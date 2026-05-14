@@ -2,6 +2,10 @@
 
 This repository is a minimal MVP for shipping signed OpenShell policy bundles. It provides Python CLIs for key generation, bundle signing, and host-side verification with rollback protection, and it is shaped to plug into an OpenShell gateway mode that requires verified host-managed policy.
 
+Paired OpenShell gateway branch / draft PR:
+
+- https://github.com/slopp/OpenShell/pull/1
+
 ## What it includes
 
 - `osp-keygen`: generates an Ed25519 keypair.
