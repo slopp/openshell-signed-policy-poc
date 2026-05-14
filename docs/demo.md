@@ -1,8 +1,9 @@
-# Demo: NemoClaw / Omnistation signed policy bundle
+# Central signer host walkthrough
 
-This walkthrough signs the existing demo policy at:
+This walkthrough covers the signing side of the MVP from a central signer host.
+It uses the small weather/Hermes policy in:
 
-`/Users/slopp/work/nemoclaw-community/examples/personal-community-sentiment-triage/policy.yaml`
+`examples/weather-hermes/policy.yaml`
 
 ## 1. Generate a signing keypair
 
@@ -10,49 +11,49 @@ This walkthrough signs the existing demo policy at:
 mkdir -p demo-out/keys demo-out/dist demo-out/state
 
 PYTHONPATH=src python3 -m openshell_signed_policy_poc.cli_keygen \
-  --private-key demo-out/keys/demo-signer.pem \
-  --public-key demo-out/keys/demo-signer.pub.pem
+  --private-key demo-out/keys/weather-signer.pem \
+  --public-key demo-out/keys/weather-signer.pub.pem
 ```
 
 ## 2. Build a signed bundle
 
 ```bash
 PYTHONPATH=src python3 -m openshell_signed_policy_poc.cli_sign \
-  --policy /Users/slopp/work/nemoclaw-community/examples/personal-community-sentiment-triage/policy.yaml \
-  --private-key demo-out/keys/demo-signer.pem \
-  --public-key demo-out/keys/demo-signer.pub.pem \
-  --bundle-out demo-out/dist/nemoclaw-community-personal-community-sentiment-triage-seq1.ospb \
-  --subject omnistation-prod/nemoclaw-personal-community-sentiment-triage \
-  --policy-name personal-community-sentiment-triage \
+  --policy examples/weather-hermes/policy.yaml \
+  --private-key demo-out/keys/weather-signer.pem \
+  --public-key demo-out/keys/weather-signer.pub.pem \
+  --bundle-out demo-out/dist/weather-hermes-seq1.ospb \
+  --subject omnistation-prod/weather-hermes \
+  --policy-name weather-hermes \
   --issuer 3s-mock \
   --sequence 1 \
   --expires-at 2026-12-31T23:59:59Z
 ```
 
-## 3. Mock Fleet installs and verifies the bundle
+## 3. Mock Fleet installs and verifies the bundle into a target-host layout
 
 ```bash
 scripts/mock_fleet_install.sh \
-  demo-out/dist/nemoclaw-community-personal-community-sentiment-triage-seq1.ospb \
-  demo-out/keys/demo-signer.pub.pem \
-  omnistation-prod/nemoclaw-personal-community-sentiment-triage \
-  /tmp/mock-host-a
+  demo-out/dist/weather-hermes-seq1.ospb \
+  demo-out/keys/weather-signer.pub.pem \
+  omnistation-prod/weather-hermes \
+  ./mock-target-host
 ```
 
 That script lays down a host-like structure:
 
-- `/tmp/mock-host-a/var/lib/openshell/policy-bundles/current/bundle.ospb`
-- `/tmp/mock-host-a/var/lib/openshell/state/verification-state.json`
-- `/tmp/mock-host-a/var/lib/openshell/state/verified-bundles/<bundle-id>/policy.yaml`
+- `./mock-target-host/var/lib/openshell/policy-bundles/current/bundle.ospb`
+- `./mock-target-host/var/lib/openshell/state/verification-state.json`
+- `./mock-target-host/var/lib/openshell/state/verified-bundles/<bundle-id>/policy.yaml`
 
 ## 4. Verify directly with the machine-readable contract
 
 ```bash
 PYTHONPATH=src python3 -m openshell_signed_policy_poc.cli_verify \
-  --bundle-dir /tmp/mock-host-a/var/lib/openshell/policy-bundles/current \
-  --trusted-key demo-out/keys/demo-signer.pub.pem \
-  --subject omnistation-prod/nemoclaw-personal-community-sentiment-triage \
-  --state-dir /tmp/mock-host-a/var/lib/openshell/state \
+  --bundle-dir ./mock-target-host/var/lib/openshell/policy-bundles/current \
+  --trusted-key demo-out/keys/weather-signer.pub.pem \
+  --subject omnistation-prod/weather-hermes \
+  --state-dir ./mock-target-host/var/lib/openshell/state \
   --no-state-update
 ```
 
@@ -64,6 +65,18 @@ The verifier emits JSON that the patched OpenShell gateway consumes, including:
 - `subject`
 - `key_id`
 
-## 5. Demonstrate rollback prevention
+## 5. Demonstrate rollback protection
 
-Re-running verification without `--no-state-update` against the same sequence should fail once the state file already records that sequence. A higher sequence should succeed.
+Run verification once without `--no-state-update`, then try the same sequence
+again:
+
+```bash
+PYTHONPATH=src python3 -m openshell_signed_policy_poc.cli_verify \
+  --bundle-dir ./mock-target-host/var/lib/openshell/policy-bundles/current \
+  --trusted-key demo-out/keys/weather-signer.pub.pem \
+  --subject omnistation-prod/weather-hermes \
+  --state-dir ./mock-target-host/var/lib/openshell/state
+```
+
+The second attempt with the same sequence should fail because the local state
+already records that sequence for the subject.

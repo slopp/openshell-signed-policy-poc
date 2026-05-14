@@ -1,22 +1,33 @@
 # OpenShell Signed Policy POC
 
-This repository is a minimal MVP for shipping signed OpenShell policy bundles. It provides Python CLIs for key generation, bundle signing, and host-side verification with rollback protection, and it is shaped to plug into an OpenShell gateway mode that requires verified host-managed policy.
+This repository is a minimal MVP for shipping signed OpenShell policy bundles.
+It provides Python CLIs for key generation, bundle signing, and host-side
+verification with rollback protection. It is designed to pair with a patched
+OpenShell gateway mode that requires verified host-managed policy.
 
 Paired OpenShell gateway branch / draft PR:
 
 - https://github.com/slopp/OpenShell/pull/1
 
 This repo does not enforce signed mode by itself. Enforcement happens in the
-paired OpenShell gateway branch, which adds a `signed_policy_required` mode and
+paired OpenShell gateway branch, which adds `signed_policy_required` mode and
 uses this repo's verifier as an external trust decision.
 
 ## What it includes
 
 - `osp-keygen`: generates an Ed25519 keypair.
-- `osp-sign`: builds a `.ospb` zip bundle containing `metadata.json`, `policy.yaml`, `manifest.json`, and `signature.json`.
-- `osp-verify`: validates bundle integrity, signature validity, trusted signer, expiry, subject binding, and sequence monotonicity via a local state directory and emits JSON the OpenShell gateway can consume.
-- Example policy and walkthrough for `nemoclaw-community / personal-community-sentiment-triage`.
-- `scripts/mock_fleet_install.sh`: copies a bundle into a mock host path and runs verification there.
+- `osp-sign`: builds a `.ospb` zip bundle containing `metadata.json`,
+  `policy.yaml`, `manifest.json`, and `signature.json`.
+- `osp-verify`: validates bundle integrity, signature validity, trusted signer,
+  expiry, subject binding, and sequence monotonicity via a local state
+  directory and emits JSON the OpenShell gateway can consume.
+- `examples/weather-hermes`: a small Hermes sandbox and policy that allows only:
+  - `curl`
+  - `python3`
+  - `hermes`
+  to read `https://wttr.in`.
+- `scripts/mock_fleet_install.sh`: copies a bundle into a mock target-host
+  layout and runs verification there.
 
 ## Bundle format
 
@@ -24,8 +35,10 @@ Each bundle is a zip archive with these required entries:
 
 - `metadata.json`: bundle identity and deployment constraints.
 - `policy.yaml`: the policy payload.
-- `manifest.json`: SHA-256 digests and byte sizes for `metadata.json` and `policy.json`.
-- `signature.json`: signer key id, payload digest, and detached Ed25519 signature.
+- `manifest.json`: SHA-256 digests and byte sizes for `metadata.json` and
+  `policy.yaml`.
+- `signature.json`: signer key id, payload digest, and detached Ed25519
+  signature.
 
 The signature covers the canonical JSON payload:
 
@@ -46,23 +59,46 @@ Verification is intentionally strict:
 - The signature must verify against the trusted public key.
 - `metadata.subject` must match `--subject`.
 - `metadata.expires_at` must still be in the future.
-- `metadata.sequence` must be greater than the last accepted sequence for that subject in the state file.
+- `metadata.sequence` must be greater than the last accepted sequence for that
+  subject in the state file.
 
-The state file is local to the host and prevents replaying an older valid bundle after a newer one has already been accepted.
+The state file is local to the target host and prevents replaying an older
+valid bundle after a newer one has already been accepted.
+
+## Roles in the POC
+
+The POC uses two explicit roles:
+
+- `central signer host`
+  - holds the private signing key
+  - signs `policy.yaml` into a `.ospb` bundle
+  - stands in for 3S or another controlled signing service
+- `target host`
+  - runs the patched OpenShell gateway
+  - stores the signed bundle, trusted public key, and verifier state
+  - stands in for a Fleet-managed Omnistation or workstation
+
+Fleet is mocked by copying files from the central signer host to the target
+host. In a real deployment, Fleet would place:
+
+- the signed bundle
+- the trusted public key
+- the verifier
+- the immutable gateway configuration that turns on signed-only mode
 
 ## How signed mode is enforced
 
 The standalone verifier in this repo is only one half of the MVP. The actual
 enforcement point is the patched OpenShell gateway in the paired fork/PR.
 
-In the validated POC, the gateway is launched with these settings:
+On the target host, the gateway is launched with these settings:
 
 - `OPENSHELL_SIGNED_POLICY_REQUIRED=true`
-- `OPENSHELL_SIGNED_POLICY_BUNDLE_DIR=<host bundle dir>`
-- `OPENSHELL_SIGNED_POLICY_VERIFIER=<path to osp-verify>`
-- `OPENSHELL_SIGNED_POLICY_TRUSTED_KEY=<path to trusted public key>`
-- `OPENSHELL_SIGNED_POLICY_SUBJECT=<expected deployment subject>`
-- `OPENSHELL_SIGNED_POLICY_STATE_DIR=<host verifier state dir>`
+- `OPENSHELL_SIGNED_POLICY_BUNDLE_DIR=<target-host-root>/current`
+- `OPENSHELL_SIGNED_POLICY_VERIFIER=<verifier-repo>/scripts/osp-verify`
+- `OPENSHELL_SIGNED_POLICY_TRUSTED_KEY=<target-host-root>/keys/weather-signer.pub.pem`
+- `OPENSHELL_SIGNED_POLICY_SUBJECT=omnistation-prod/weather-hermes`
+- `OPENSHELL_SIGNED_POLICY_STATE_DIR=<target-host-root>/state`
 
 When those are set, the patched gateway:
 
@@ -74,53 +110,9 @@ When those are set, the patched gateway:
   - draft rule approval / rejection flows
 - rejects sandbox creation when inline `--policy` is supplied
 
-That is the core “verified only” behavior. The verifier decides whether the
+That is the core verified-only behavior. The verifier decides whether the
 bundle is valid; the gateway decides whether unverified or mutable policy paths
 are allowed.
-
-## How OpenShell is installed and launched in the POC
-
-The Omnistation proof of life used:
-
-1. a patched OpenShell build from the paired `slopp/OpenShell` branch
-2. the verifier from this repo copied to the host
-3. a signed bundle and trusted public key copied to the host
-4. a gateway process launched with signed-policy mode enabled
-
-The validated gateway launch on `omni-lsn-mmcth` used a command shape like:
-
-```bash
-OPENSHELL_SIGNED_POLICY_REQUIRED=true \
-OPENSHELL_SIGNED_POLICY_BUNDLE_DIR=/home/slopp/poc-signed-policy-mmcth/current \
-OPENSHELL_SIGNED_POLICY_VERIFIER=/home/slopp/work/openshell-signed-policy-poc/scripts/osp-verify \
-OPENSHELL_SIGNED_POLICY_TRUSTED_KEY=/home/slopp/poc-signed-policy-mmcth/keys/demo-signer.pub.pem \
-OPENSHELL_SIGNED_POLICY_SUBJECT=omnistation-prod/nemoclaw-personal-community-sentiment-triage \
-OPENSHELL_SIGNED_POLICY_STATE_DIR=/home/slopp/poc-signed-policy-mmcth/state \
-/home/slopp/work/OpenShell-signed-policy/target/debug/openshell-gateway ...
-```
-
-The full Omnistation walkthrough, including the NemoClaw demo sandbox running
-through this gateway, is in [docs/omnistation-mmcth.md](docs/omnistation-mmcth.md).
-
-## What Fleet is responsible for
-
-In this MVP, “Fleet” is mocked by a human or helper script. In a real rollout,
-Fleet is responsible for making the host-side enforcement durable:
-
-- place the signed bundle on the host
-- place trusted key material on the host
-- place or install the verifier on the host
-- launch the gateway with signed-policy mode enabled
-- make those gateway settings effectively immutable to the human operator
-
-In other words:
-
-- this repo provides signing and verification tools
-- the patched OpenShell fork provides enforcement
-- Fleet is what pins the host into that enforcement mode
-
-Without that last step, an operator could still restart the gateway in a
-different mode and bypass the POC.
 
 ## Quickstart
 
@@ -132,35 +124,44 @@ scripts/osp-sign --help
 scripts/osp-verify --help
 ```
 
-Full demo commands are in [docs/demo.md](docs/demo.md).
+Full walkthrough:
 
-## Omnistation proof of life
+- central signer host: [docs/demo.md](docs/demo.md)
+- target host / signed gateway: [docs/target-host.md](docs/target-host.md)
 
-This POC was validated end to end on Omnistation host `omni-lsn-mmcth` against
-the real `nemoclaw-community/examples/personal-community-sentiment-triage`
-OpenShell policy.
+## MVP validation flow
 
-The exercised flow was:
+The current proof-of-life uses `examples/weather-hermes` and validates the same
+behavior twice:
 
-1. Generate a mock signer keypair.
-2. Sign the real NemoClaw `policy.yaml` into a `.ospb` bundle.
-3. Copy the bundle and trusted public key to the host as a stand-in for Fleet.
-4. Run `osp-verify` on-host and point a patched OpenShell gateway at:
-   - the current bundle directory
-   - the trusted public key
-   - the verifier executable
-   - a local verification state directory
-5. Create the NemoClaw sandbox without supplying `--policy`, so the sandbox
-   must fetch policy from the verified host bundle.
-6. Confirm host-side tampering is rejected:
-   - `openshell policy set`
-   - `openshell policy delete`
-   - `openshell rule approve* / reject*`
+1. unsigned sandbox on a normal gateway
+2. signed bundle on a signed-only gateway
+
+The exercised flow is:
+
+1. Build a minimal Hermes sandbox from `examples/weather-hermes/Dockerfile`.
+2. Apply `examples/weather-hermes/policy.yaml` directly and prove:
+   - `curl https://wttr.in/?format=3` works
+   - Python HTTPS fetch to `wttr.in` works
+   - unrelated outbound traffic such as `https://api.github.com/zen` is denied
+   - `hermes chat` can answer a weather prompt when told to use `curl`
+3. Sign the same `policy.yaml` into a `.ospb` bundle on the central signer
+   host.
+4. Copy the bundle and trusted public key to the target host as a stand-in for
+   Fleet.
+5. Launch the patched OpenShell gateway on the target host in
+   `signed_policy_required` mode.
+6. Create the same sandbox without supplying `--policy`, so it must fetch
+   policy from the verified host bundle.
+7. Repeat the allow/deny/Hermes checks.
+8. Confirm host-side tampering is rejected:
+   - `openshell policy delete --global`
+   - `openshell rule approve-all`
    - `openshell sandbox create --policy ...`
 
-See [docs/demo.md](docs/demo.md) for the local signing flow and
-[docs/omnistation-mmcth.md](docs/omnistation-mmcth.md) for the host-side
-validation runbook.
+This flow was validated on a live Omnistation target host, but the commands in
+this repo are written with relative paths so the setup can be reviewed and
+repeated elsewhere.
 
 ## How this maps to a real implementation
 
@@ -171,9 +172,9 @@ This repository deliberately mocks two production roles:
   - In production, signing should happen in a controlled service or CI path,
     not on an operator laptop.
 - `Fleet` or another host configuration system:
-  - In this POC, a human copies the bundle to the host or runs
+  - In this POC, a human copies the bundle to the target host or runs
     `scripts/mock_fleet_install.sh`.
-  - In production, a fleet system would place the bundle, trusted key material,
+  - In production, Fleet would place the bundle, trusted key material,
     verifier path, and immutable OpenShell gateway config on the host.
 
 The OpenShell integration is intentionally narrow:

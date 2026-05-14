@@ -1,0 +1,16 @@
+_config_version: 12
+model:
+  default: nvidia/nemotron-3-super-120b-a12b
+  provider: custom
+  base_url: "https://inference.local/v1"
+terminal:
+  backend: local
+  timeout: 180
+agent:
+  max_turns: 12
+  reasoning_effort: medium
+display:
+  compact: false
+approvals:
+  mode: smart
+  timeout: 60
