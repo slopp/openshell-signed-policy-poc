@@ -187,3 +187,39 @@ The OpenShell integration is intentionally narrow:
 
 That keeps the MVP aligned with a future standalone verifier architecture while
 still enforcing the part OpenShell can enforce today.
+
+## Open question: alternate gateway bypass on the host
+
+This POC does not prove that the signed gateway is the only OpenShell gateway a
+human operator could run on the target host.
+
+What the POC does prove:
+
+- if the patched gateway is launched in `signed_policy_required` mode, it will
+  only serve verified host-managed policy
+- that gateway rejects mutable policy updates and inline sandbox policy
+
+What the POC does not yet solve:
+
+- preventing an operator with sufficient host access from starting a different
+  OpenShell gateway process on another port or with different config
+- proving that the signed gateway is the only gateway entrypoint available on
+  the machine
+
+So there is an intentional boundary in this MVP:
+
+- signer + verifier + patched gateway prove the policy-verification and
+  runtime-enforcement path
+- separate host management controls are still needed to make bypassing that
+  gateway difficult or impossible
+
+Those controls may or may not belong to Fleet directly. They could instead live
+in broader host-management or workstation-management mechanisms such as:
+
+- service ownership and immutability
+- process launch restrictions
+- filesystem permissions on gateway binaries and config
+- port binding and firewall policy
+- stronger host attestation or managed-device controls later
+
+This is left as an explicit open question rather than being hidden by the POC.
