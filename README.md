@@ -6,6 +6,10 @@ Paired OpenShell gateway branch / draft PR:
 
 - https://github.com/slopp/OpenShell/pull/1
 
+This repo does not enforce signed mode by itself. Enforcement happens in the
+paired OpenShell gateway branch, which adds a `signed_policy_required` mode and
+uses this repo's verifier as an external trust decision.
+
 ## What it includes
 
 - `osp-keygen`: generates an Ed25519 keypair.
@@ -45,6 +49,78 @@ Verification is intentionally strict:
 - `metadata.sequence` must be greater than the last accepted sequence for that subject in the state file.
 
 The state file is local to the host and prevents replaying an older valid bundle after a newer one has already been accepted.
+
+## How signed mode is enforced
+
+The standalone verifier in this repo is only one half of the MVP. The actual
+enforcement point is the patched OpenShell gateway in the paired fork/PR.
+
+In the validated POC, the gateway is launched with these settings:
+
+- `OPENSHELL_SIGNED_POLICY_REQUIRED=true`
+- `OPENSHELL_SIGNED_POLICY_BUNDLE_DIR=<host bundle dir>`
+- `OPENSHELL_SIGNED_POLICY_VERIFIER=<path to osp-verify>`
+- `OPENSHELL_SIGNED_POLICY_TRUSTED_KEY=<path to trusted public key>`
+- `OPENSHELL_SIGNED_POLICY_SUBJECT=<expected deployment subject>`
+- `OPENSHELL_SIGNED_POLICY_STATE_DIR=<host verifier state dir>`
+
+When those are set, the patched gateway:
+
+- shells out to `osp-verify`
+- serves only the verified host-managed policy bundle to sandboxes
+- rejects mutable host-side policy operations:
+  - `openshell policy set`
+  - `openshell policy delete`
+  - draft rule approval / rejection flows
+- rejects sandbox creation when inline `--policy` is supplied
+
+That is the core “verified only” behavior. The verifier decides whether the
+bundle is valid; the gateway decides whether unverified or mutable policy paths
+are allowed.
+
+## How OpenShell is installed and launched in the POC
+
+The Omnistation proof of life used:
+
+1. a patched OpenShell build from the paired `slopp/OpenShell` branch
+2. the verifier from this repo copied to the host
+3. a signed bundle and trusted public key copied to the host
+4. a gateway process launched with signed-policy mode enabled
+
+The validated gateway launch on `omni-lsn-mmcth` used a command shape like:
+
+```bash
+OPENSHELL_SIGNED_POLICY_REQUIRED=true \
+OPENSHELL_SIGNED_POLICY_BUNDLE_DIR=/home/slopp/poc-signed-policy-mmcth/current \
+OPENSHELL_SIGNED_POLICY_VERIFIER=/home/slopp/work/openshell-signed-policy-poc/scripts/osp-verify \
+OPENSHELL_SIGNED_POLICY_TRUSTED_KEY=/home/slopp/poc-signed-policy-mmcth/keys/demo-signer.pub.pem \
+OPENSHELL_SIGNED_POLICY_SUBJECT=omnistation-prod/nemoclaw-personal-community-sentiment-triage \
+OPENSHELL_SIGNED_POLICY_STATE_DIR=/home/slopp/poc-signed-policy-mmcth/state \
+/home/slopp/work/OpenShell-signed-policy/target/debug/openshell-gateway ...
+```
+
+The full Omnistation walkthrough, including the NemoClaw demo sandbox running
+through this gateway, is in [docs/omnistation-mmcth.md](docs/omnistation-mmcth.md).
+
+## What Fleet is responsible for
+
+In this MVP, “Fleet” is mocked by a human or helper script. In a real rollout,
+Fleet is responsible for making the host-side enforcement durable:
+
+- place the signed bundle on the host
+- place trusted key material on the host
+- place or install the verifier on the host
+- launch the gateway with signed-policy mode enabled
+- make those gateway settings effectively immutable to the human operator
+
+In other words:
+
+- this repo provides signing and verification tools
+- the patched OpenShell fork provides enforcement
+- Fleet is what pins the host into that enforcement mode
+
+Without that last step, an operator could still restart the gateway in a
+different mode and bypass the POC.
 
 ## Quickstart
 
@@ -98,7 +174,7 @@ This repository deliberately mocks two production roles:
   - In this POC, a human copies the bundle to the host or runs
     `scripts/mock_fleet_install.sh`.
   - In production, a fleet system would place the bundle, trusted key material,
-    and immutable OpenShell config on the host.
+    verifier path, and immutable OpenShell gateway config on the host.
 
 The OpenShell integration is intentionally narrow:
 
