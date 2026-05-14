@@ -1,0 +1,48 @@
+{
+  "policy_id": "personal-community-sentiment-triage",
+  "subject": "nemoclaw-community",
+  "version": "2026-05-14",
+  "mode": "advisory",
+  "description": "Triages community messages for sentiment risk, moderation escalation, and routing.",
+  "classification": {
+    "allow": [
+      "support_request",
+      "bug_report",
+      "product_feedback",
+      "moderation_issue",
+      "sentiment_risk"
+    ],
+    "deny": [
+      "credential_request",
+      "payment_collection",
+      "medical_advice",
+      "legal_advice"
+    ]
+  },
+  "routing": {
+    "default_queue": "community-triage",
+    "priority_overrides": {
+      "moderation_issue": "urgent",
+      "sentiment_risk": "high"
+    }
+  },
+  "actions": [
+    {
+      "when": "moderation_issue",
+      "then": "page-oncall-moderation"
+    },
+    {
+      "when": "sentiment_risk",
+      "then": "route-to-human-review"
+    },
+    {
+      "when": "product_feedback",
+      "then": "attach-feedback-taxonomy"
+    }
+  ],
+  "thresholds": {
+    "negative_sentiment_score": 0.72,
+    "harassment_score": 0.65,
+    "self_harm_escalation_score": 0.4
+  }
+}

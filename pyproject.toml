@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openshell-signed-policy-poc"
+version = "0.1.0"
+description = "Signed OpenShell policy proof of concept"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+osp-keygen = "openshell_signed_policy_poc.cli_keygen:main"
+osp-sign = "openshell_signed_policy_poc.cli_sign:main"
+osp-verify = "openshell_signed_policy_poc.cli_verify:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
